@@ -78,17 +78,6 @@ pub struct Element {
     children: Vec<Element>,
 }
 
-// Fn(input) -> Result<(input, output), Error>
-//
-// Fn(&str) -> Result<(&str, Element), &str>
-
-pub fn the_letter_a(input: &str) -> Result<(&str, ()), &str> {
-    match input.chars().next() {
-        Some('a') => Ok((&input['a'.len_utf8()..], ())),
-        _ => Err(input),
-    }
-}
-
 pub fn match_literal<'a>(expected: &'static str) -> impl Parser<'a, ()> {
     move |input: &'a str| match input.get(0..expected.len()) {
         Some(next) if next == expected => Ok((&input[expected.len()..], ())),
