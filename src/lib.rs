@@ -2,6 +2,8 @@
 //     <single-element attribute="value" />
 // </parent-element>
 
+#![type_length_limit = "1137933"]
+
 use std::option::Option::Some;
 use std::result::Result::Ok;
 
@@ -17,6 +19,27 @@ where
 {
     fn parse(&self, input: &'a str) -> ParseResult<'a, Output> {
         self(input)
+    }
+}
+
+pub struct BoxedParser<'a, Output> {
+    parser: Box<dyn Parser<'a, Output> + 'a>,
+}
+
+impl<'a, Output> BoxedParser<'a, Output> {
+    pub fn new<P>(parser: P) -> Self
+    where
+        P: Parser<'a, Output> + 'a,
+    {
+        BoxedParser {
+            parser: Box::new(parser),
+        }
+    }
+}
+
+impl<'a, Output> Parser<'a, Output> for BoxedParser<'a, Output> {
+    fn parse(&self, input: &'a str) -> ParseResult<'a, Output> {
+        self.parser.parse(input)
     }
 }
 
@@ -147,6 +170,76 @@ where
     }
 }
 
+pub fn any_char(input: &str) -> ParseResult<char> {
+    match input.chars().next() {
+        Some(next) => Ok((&input[next.len_utf8()..], next)),
+        _ => Err(input),
+    }
+}
+
+pub fn pred<'a, P, A, F>(parser: P, predicate: F) -> impl Parser<'a, A>
+where
+    P: Parser<'a, A>,
+    F: Fn(&A) -> bool,
+{
+    move |input| {
+        if let Ok((next_input, value)) = parser.parse(input) {
+            if predicate(&value) {
+                return Ok((next_input, value));
+            }
+        }
+        Err(input)
+    }
+}
+
+pub fn whitespace_char<'a>() -> impl Parser<'a, char> {
+    pred(any_char, |c| c.is_whitespace())
+}
+
+pub fn space1<'a>() -> impl Parser<'a, Vec<char>> {
+    one_or_more(whitespace_char())
+}
+
+pub fn space0<'a>() -> impl Parser<'a, Vec<char>> {
+    zero_or_more(whitespace_char())
+}
+
+pub fn quoted_string<'a>() -> impl Parser<'a, String> {
+    map(
+        right(
+            match_literal("\""),
+            left(
+                zero_or_more(pred(any_char, |c| *c != '"')),
+                match_literal("\""),
+            ),
+        ),
+        |chars| chars.into_iter().collect(),
+    )
+}
+
+pub fn attribute_pair<'a>() -> impl Parser<'a, (String, String)> {
+    pair(identifier, right(match_literal("="), quoted_string()))
+}
+
+pub fn attributes<'a>() -> impl Parser<'a, Vec<(String, String)>> {
+    zero_or_more(right(space1(), attribute_pair()))
+}
+
+/*pub fn element_start<'a>() -> impl Parser<'a, (String, Vec<(String, String)>)> {
+    right(match_literal("<"), pair(identifier, attributes()))
+}*/
+
+/*pub fn single_element<'a>() -> impl Parser<'a, Element> {
+    map(
+        left(element_start(), match_literal("/>")),
+        |(name, attributes)| Element {
+            name,
+            attributes,
+            children: vec![],
+        },
+    )
+}*/
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,4 +297,48 @@ mod tests {
         assert_eq!(Ok(("ahah", vec![])), parser.parse("ahah"));
         assert_eq!(Ok(("", vec![])), parser.parse(""));
     }
+
+    #[test]
+    fn predicate_combinator() {
+        let parser = pred(any_char, |c| *c == 'o');
+        assert_eq!(Ok(("mg", 'o')), parser.parse("omg"));
+        assert_eq!(Err("lol"), parser.parse("lol"));
+    }
+
+    #[test]
+    fn quoted_string_parser() {
+        assert_eq!(
+            Ok(("", "Hello Joe!".to_string())),
+            quoted_string().parse("\"Hello Joe!\"")
+        );
+    }
+
+    #[test]
+    fn attribute_parser() {
+        assert_eq!(
+            Ok((
+                "",
+                vec![
+                    ("one".to_string(), "1".to_string()),
+                    ("two".to_string(), "2".to_string())
+                ]
+            )),
+            attributes().parse(" one=\"1\" two=\"2\"")
+        );
+    }
+
+    /*#[test]
+    fn single_element_parser() {
+        assert_eq!(
+            Ok((
+                "",
+                Element {
+                    name: "div".to_string(),
+                    attributes: vec![("class".to_string(), "float".to_string())],
+                    children: vec![]
+                }
+            )),
+            single_element().parse("<div class=\"float\"/>")
+        );
+    }*/
 }
