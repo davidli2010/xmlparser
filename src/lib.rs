@@ -2,8 +2,6 @@
 //     <single-element attribute="value" />
 // </parent-element>
 
-#![type_length_limit = "1137933"]
-
 use std::option::Option::Some;
 use std::result::Result::Ok;
 
@@ -11,6 +9,25 @@ pub type ParseResult<'a, Output> = Result<(&'a str, Output), &'a str>;
 
 pub trait Parser<'a, Output> {
     fn parse(&self, input: &'a str) -> ParseResult<'a, Output>;
+
+    fn map<F, NewOutput>(self, map_fn: F) -> BoxedParser<'a, NewOutput>
+    where
+        Self: Sized + 'a,
+        Output: 'a,
+        NewOutput: 'a,
+        F: Fn(Output) -> NewOutput + 'a,
+    {
+        BoxedParser::new(map(self, map_fn))
+    }
+
+    fn pred<F>(self, pred_fn: F) -> BoxedParser<'a, Output>
+    where
+        Self: Sized + 'a,
+        Output: 'a,
+        F: Fn(&Output) -> bool + 'a,
+    {
+        BoxedParser::new(pred(self, pred_fn))
+    }
 }
 
 impl<'a, F, Output> Parser<'a, Output> for F
@@ -205,16 +222,14 @@ pub fn space0<'a>() -> impl Parser<'a, Vec<char>> {
 }
 
 pub fn quoted_string<'a>() -> impl Parser<'a, String> {
-    map(
-        right(
+    right(
+        match_literal("\""),
+        left(
+            zero_or_more(any_char.pred(|c| *c != '"')),
             match_literal("\""),
-            left(
-                zero_or_more(pred(any_char, |c| *c != '"')),
-                match_literal("\""),
-            ),
         ),
-        |chars| chars.into_iter().collect(),
     )
+    .map(|chars| chars.into_iter().collect())
 }
 
 pub fn attribute_pair<'a>() -> impl Parser<'a, (String, String)> {
@@ -225,20 +240,17 @@ pub fn attributes<'a>() -> impl Parser<'a, Vec<(String, String)>> {
     zero_or_more(right(space1(), attribute_pair()))
 }
 
-/*pub fn element_start<'a>() -> impl Parser<'a, (String, Vec<(String, String)>)> {
+pub fn element_start<'a>() -> impl Parser<'a, (String, Vec<(String, String)>)> {
     right(match_literal("<"), pair(identifier, attributes()))
-}*/
+}
 
-/*pub fn single_element<'a>() -> impl Parser<'a, Element> {
-    map(
-        left(element_start(), match_literal("/>")),
-        |(name, attributes)| Element {
-            name,
-            attributes,
-            children: vec![],
-        },
-    )
-}*/
+pub fn single_element<'a>() -> impl Parser<'a, Element> {
+    left(element_start(), match_literal("/>")).map(|(name, attributes)| Element {
+        name,
+        attributes,
+        children: vec![],
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -327,7 +339,7 @@ mod tests {
         );
     }
 
-    /*#[test]
+    #[test]
     fn single_element_parser() {
         assert_eq!(
             Ok((
@@ -340,5 +352,5 @@ mod tests {
             )),
             single_element().parse("<div class=\"float\"/>")
         );
-    }*/
+    }
 }
